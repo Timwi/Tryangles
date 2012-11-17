@@ -92,7 +92,11 @@ namespace Tryangles
 		public bool IsEmpty { get { return lines.Count == 0; } }
 
 		private List<Line> lines = new List<Line>();
+		private List<List<Line>> triangles = null;
 		private short[] points = new short[0];
+
+		[Browsable(false)]
+		public bool HasTriangles { get { return triangles != null && triangles.Count > 0; } }
 
 		private Point? firstPoint = null;
 		private int highlightRow = -1, highlightColumn = -1;
@@ -129,9 +133,10 @@ namespace Tryangles
 		{
 			lines.Add(new Line(x1, y1, x2, y2));
 			MarkPoints(x1, y1, x2, y2);
+			CheckForTriangles();
 		}
 
-		private void MarkPoints(int x1, int y1, int x2, int y2, short delta = 1)
+		private IEnumerable<Point> GridPoints(int x1, int y1, int x2, int y2)
 		{
 			var dx = x2 - x1;
 			var dy = y2 - y1;
@@ -150,10 +155,16 @@ namespace Tryangles
 
 			if (y1 > y2)
 				for (int x = x1, y = y1; x <= x2 && y >= y2; x += dx, y += dy)
-					points[x + y * boardWidth] += delta;
+					yield return new Point(x, y);
 			else
 				for (int x = x1, y = y1; x <= x2 && y <= y2; x += dx, y += dy)
-					points[x + y * boardWidth] += delta;
+					yield return new Point(x, y);
+		}
+
+		private void MarkPoints(int x1, int y1, int x2, int y2, short delta = 1)
+		{
+			foreach (var point in GridPoints(x1, y1, x2, y2))
+				points[point.X + point.Y * boardWidth] += delta;
 		}
 
 		private static void Swap(ref int a, ref int b)
@@ -171,11 +182,55 @@ namespace Tryangles
 				return GCD(b, a % b);
 		}
 
+		private void CheckForTriangles()
+		{
+			var lineSegments = lines.SelectMany(line =>
+				GridPoints(line.X1, line.Y1, line.X2, line.Y2)
+					.ConsecutivePairs()
+					.Select(pair => new Line(pair.Item1, pair.Item2))
+			).ToList();
+			triangles = FindTriangles(lineSegments);
+		}
+
+		private List<List<Line>> FindTriangles(List<Line> segments)
+		{
+			var list = new List<List<Line>>();
+			FindTriangles(segments, list, new List<Line>(), 0, default(Line));
+			return list;
+		}
+
+		private void FindTriangles(List<Line> segments, List<List<Line>> list, List<Line> cur, int vertices, Line lastLine)
+		{
+			if (vertices == 3)
+				return;
+			if (vertices == 2 && lastLine.X2 == cur[0].X1 && lastLine.Y2 == cur[0].Y1)
+			{
+				list.Add(cur.ToList());
+				return;
+			}
+			foreach (var segment in segments)
+			{
+				if (cur.Contains(segment))
+					continue;
+				// Try to extend the current unfinished triangle in “cur”
+				int targetX = segment.X2, targetY = segment.Y2;
+				Line resultLine = segment;
+				bool isCollinear = true;
+				if (cur.Count == 0 || segment.JoinsUpWith(lastLine, ref targetX, ref targetY, ref resultLine, ref isCollinear))
+				{
+					cur.Add(segment);
+					FindTriangles(segments, list, cur, isCollinear ? vertices : vertices + 1, resultLine);
+					cur.RemoveAt(cur.Count - 1);
+				}
+			}
+		}
+
 		private void RemoveLastLine()
 		{
 			var line = lines[lines.Count - 1];
 			lines.RemoveAt(lines.Count - 1); // remove last
 			MarkPoints(line.X1, line.Y1, line.X2, line.Y2, -1);
+			CheckForTriangles();
 		}
 
 		private void Draw(Graphics g)
@@ -242,6 +297,14 @@ namespace Tryangles
 						x + (i % boardWidth) * Spacing - 2.5f,
 						y + (i / boardWidth) * Spacing - 2.5f,
 						5.0f, 5.0f);
+
+			if (triangles != null)
+				foreach (var triangle in triangles)
+					foreach (var line in triangle)
+						g.DrawLine(TrianglePen,
+							x + line.X1 * Spacing, y + line.Y1 * Spacing,
+							x + line.X2 * Spacing, y + line.Y2 * Spacing);
+
 		}
 
 		protected override void OnPaint(PaintEventArgs e)
@@ -345,6 +408,7 @@ namespace Tryangles
 
 		private static readonly Pen LinePen = new Pen(Color.Blue, 2.5f);
 		private static readonly Pen LastLinePen = new Pen(Color.CornflowerBlue, 2.5f);
+		private static readonly Pen TrianglePen = new Pen(Color.Red, 3f);
 		private static readonly StringFormat LabelFormat = new StringFormat()
 		{
 			Alignment = StringAlignment.Center,
@@ -362,7 +426,7 @@ namespace Tryangles
 		private const int Spacing = 44;
 		private const int ClickTolerance = 15;
 
-		private struct Line
+		private struct Line : IEquatable<Line>
 		{
 			public Line(int x1, int y1, int x2, int y2)
 			{
@@ -382,6 +446,58 @@ namespace Tryangles
 			}
 
 			public int X1, X2, Y1, Y2;
+
+			public bool JoinsUpWith(Line lastLine, ref int targetX, ref int targetY, ref Line resultLine, ref bool isCollinear)
+			{
+				if (X1 == lastLine.X2 && Y1 == lastLine.Y2)
+				{
+					targetX = X2;
+					targetY = Y2;
+					resultLine = this;
+					isCollinear = (Y1 - lastLine.Y1) * (X2 - X1) == (Y2 - Y1) * (X1 - lastLine.X1);
+					return true;
+				}
+				else if (X2 == lastLine.X2 && Y2 == lastLine.Y2)
+				{
+					targetX = X1;
+					targetY = Y1;
+					resultLine = new Line(X2, Y2, X1, Y1);
+					isCollinear = (Y2 - lastLine.Y1) * (X1 - X2) == (Y1 - Y2) * (X2 - lastLine.X1);
+					return true;
+				}
+				return false;
+			}
+
+			public bool Equals(Line other)
+			{
+				return this == other;
+			}
+
+			public override bool Equals(object obj)
+			{
+				return obj is Line && Equals((Line)obj);
+			}
+
+			public override int GetHashCode()
+			{
+				return unchecked(((X1 * 13 + X2) * 13 + Y1) * 13 + Y2);
+			}
+
+			public override string ToString()
+			{
+				return string.Format("[{0}, {1}] → [{2}, {3}]", X1, Y1, X2, Y2);
+			}
+
+			public static bool operator ==(Line a, Line b)
+			{
+				return a.X1 == b.X1 && a.Y1 == b.Y1 &&
+					a.X2 == b.X2 && a.Y2 == b.Y2;
+			}
+
+			public static bool operator !=(Line a, Line b)
+			{
+				return !(a == b);
+			}
 		}
 	}
 }
