@@ -120,73 +120,38 @@ namespace Tryangles
 			else
 			{
 				var fp = firstPoint.Value;
+				firstPoint = null;
+				highlightColumn = highlightRow = -1;
 				if (fp.X == x && fp.Y == y)
 					return;
-				AddLine(fp.X, fp.Y, x, y);
-				highlightColumn = highlightRow = -1;
-				firstPoint = null;
+				var newLine = new Line(fp.X, fp.Y, x, y);
+				// broken check for moves that intersect a junction:
+				// newLine.GetGridPoints().Skip(1).SkipLast(1).Any(p => lines.Count(line => p == line.Start || p == line.End) > 1)
+				if (lines.Any(line => line.IntersectsWith(newLine)))
+					MessageBox.Show("You cannot play intersecting lines.");
+				else
+					AddLine(newLine);
 			}
 			this.Refresh();
 		}
 
-		private void AddLine(int x1, int y1, int x2, int y2)
+		private void AddLine(Line newLine)
 		{
-			lines.Add(new Line(x1, y1, x2, y2));
-			MarkPoints(x1, y1, x2, y2);
+			lines.Add(newLine);
+			MarkPoints(newLine);
 			CheckForTriangles();
 		}
 
-		private IEnumerable<Point> GridPoints(int x1, int y1, int x2, int y2)
+		private void MarkPoints(Line line, short delta = 1)
 		{
-			var dx = x2 - x1;
-			var dy = y2 - y1;
-			var gcd = GCD(Math.Abs(dx), Math.Abs(dy));
-			dx /= gcd;
-			dy /= gcd;
-
-			if (x1 > x2)
-			{
-				Swap(ref x1, ref x2);
-				dx = -dx;
-
-				Swap(ref y1, ref y2);
-				dy = -dy;
-			}
-
-			if (y1 > y2)
-				for (int x = x1, y = y1; x <= x2 && y >= y2; x += dx, y += dy)
-					yield return new Point(x, y);
-			else
-				for (int x = x1, y = y1; x <= x2 && y <= y2; x += dx, y += dy)
-					yield return new Point(x, y);
-		}
-
-		private void MarkPoints(int x1, int y1, int x2, int y2, short delta = 1)
-		{
-			foreach (var point in GridPoints(x1, y1, x2, y2))
+			foreach (var point in line.GetGridPoints())
 				points[point.X + point.Y * boardWidth] += delta;
-		}
-
-		private static void Swap(ref int a, ref int b)
-		{
-			var temp = a;
-			a = b;
-			b = temp;
-		}
-
-		private static int GCD(int a, int b)
-		{
-			if (b == 0)
-				return a;
-			else
-				return GCD(b, a % b);
 		}
 
 		private void CheckForTriangles()
 		{
 			var lineSegments = lines.SelectMany(line =>
-				GridPoints(line.X1, line.Y1, line.X2, line.Y2)
-					.ConsecutivePairs()
+				line.GetGridPoints().ConsecutivePairs()
 					.Select(pair => new Line(pair.Item1, pair.Item2))
 			).ToList();
 			triangles = FindTriangles(lineSegments);
@@ -229,7 +194,7 @@ namespace Tryangles
 		{
 			var line = lines[lines.Count - 1];
 			lines.RemoveAt(lines.Count - 1); // remove last
-			MarkPoints(line.X1, line.Y1, line.X2, line.Y2, -1);
+			MarkPoints(line, -1);
 			CheckForTriangles();
 		}
 
@@ -447,6 +412,9 @@ namespace Tryangles
 
 			public int X1, X2, Y1, Y2;
 
+			public Point Start { get { return new Point(X1, Y1); } }
+			public Point End { get { return new Point(X2, Y2); } }
+
 			public bool JoinsUpWith(Line lastLine, ref int targetX, ref int targetY, ref Line resultLine, ref bool isCollinear)
 			{
 				if (X1 == lastLine.X2 && Y1 == lastLine.Y2)
@@ -466,6 +434,49 @@ namespace Tryangles
 					return true;
 				}
 				return false;
+			}
+
+			public bool IntersectsWith(Line other)
+			{
+				double mx = X2 - X1;
+				double my = Y2 - Y1;
+				double rmx = other.X2 - other.X1;
+				double rmy = other.Y2 - other.Y1;
+				double dx = other.X1 - X1;
+				double dy = Y1 - other.Y1;
+
+				double d = (mx * rmy - my * rmx);
+				double n = (mx * dy + my * dx) / d;
+				double q = (rmx * dy + rmy * dx) / d;
+
+				return (n > 0 && n < 1 && q > 0 && q < 1);
+			}
+
+			public IEnumerable<Point> GetGridPoints()
+			{
+				int x1 = X1, y1 = Y1, x2 = X2, y2 = Y2;
+
+				var dx = x2 - x1;
+				var dy = y2 - y1;
+				var gcd = Extensions.GCD(Math.Abs(dx), Math.Abs(dy));
+				dx /= gcd;
+				dy /= gcd;
+
+				if (x1 > x2)
+				{
+					Extensions.Swap(ref x1, ref x2);
+					dx = -dx;
+
+					Extensions.Swap(ref y1, ref y2);
+					dy = -dy;
+				}
+
+				if (y1 > y2)
+					for (int x = x1, y = y1; x <= x2 && y >= y2; x += dx, y += dy)
+						yield return new Point(x, y);
+				else
+					for (int x = x1, y = y1; x <= x2 && y <= y2; x += dx, y += dy)
+						yield return new Point(x, y);
 			}
 
 			public bool Equals(Line other)
