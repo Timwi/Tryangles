@@ -122,15 +122,16 @@ namespace Tryangles
 				var fp = firstPoint.Value;
 				firstPoint = null;
 				highlightColumn = highlightRow = -1;
-				if (fp.X == x && fp.Y == y)
-					return;
-				var newLine = new Line(fp.X, fp.Y, x, y);
-				// broken check for moves that intersect a junction:
-				// newLine.GetGridPoints().Skip(1).SkipLast(1).Any(p => lines.Count(line => p == line.Start || p == line.End) > 1)
-				if (lines.Any(line => line.IntersectsWith(newLine)))
-					MessageBox.Show("You cannot play intersecting lines.");
-				else
-					AddLine(newLine);
+				if (fp.X != x || fp.Y != y)
+				{
+					var newLine = new Line(fp.X, fp.Y, x, y);
+					// broken check for moves that intersect a junction:
+					// newLine.GetGridPoints().Skip(1).SkipLast(1).Any(p => lines.Count(line => p == line.Start || p == line.End) > 1)
+					if (lines.Any(line => line.IntersectsWith(newLine)))
+						MessageBox.Show("You cannot play intersecting lines.");
+					else
+						AddLine(newLine);
+				}
 			}
 			this.Refresh();
 		}
